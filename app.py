@@ -283,57 +283,7 @@ def load_custom_css():
         background-color: #f0f4f8;
     }
 
-    /* ============ MENU GRID (เหมือนแอปแอร์) ============ */
-    .pos-menu-grid [data-testid="stHorizontalBlock"] {
-        display: grid !important;
-        grid-template-columns: repeat(3, 1fr) !important;
-        gap: 10px !important;
-        width: 100% !important;
-    }
-    @media (max-width: 480px) {
-        .pos-menu-grid [data-testid="stHorizontalBlock"] {
-            grid-template-columns: repeat(3, 1fr) !important;
-            gap: 8px !important;
-        }
-        .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"] {
-            min-height: 75px !important;
-            font-size: 28px !important;
-            border-radius: 14px !important;
-        }
-    }
-    .pos-menu-grid [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-        width: auto !important; min-width: 0 !important;
-        max-width: none !important; flex: none !important;
-        padding: 0 !important;
-    }
-    .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"] {
-        width: 100% !important;
-        min-height: 90px !important;
-        border-radius: 18px !important;
-        border: 1px solid rgba(0,0,0,0.04) !important;
-        background: white !important;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
-        font-size: 36px !important;
-        padding: 12px 4px 6px !important;
-        line-height: 1 !important;
-        transition: all 0.15s ease !important;
-    }
-    .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 24px rgba(0,0,0,0.12) !important;
-    }
-    .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"]:active {
-        transform: scale(0.96) !important;
-    }
-    .pos-menu-label {
-        text-align: center;
-        font-size: 13px;
-        font-weight: 700;
-        color: #1e293b;
-        margin: 2px 0 10px;
-        line-height: 1.25;
-    }
-    .pos-menu-label-logout { color: #dc2626 !important; }
+    /* Menu grid styles are now inline HTML */
 
     /* Header gradient */
     .header-gradient {
@@ -1725,7 +1675,7 @@ def page_home():
             <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:#dc2626;">{low_stock} รายการ</p>
         </div>""", unsafe_allow_html=True)
 
-    # Menu Grid
+    # Menu Grid — pure HTML (works on mobile!)
     st.markdown('<p style="font-size:14px; font-weight:700; color:#475569; margin:16px 0 10px; letter-spacing:0.3px;">📱 เมนูหลัก</p>', unsafe_allow_html=True)
 
     menu_items = [
@@ -1738,39 +1688,47 @@ def page_home():
         ("🚪", "ออกจากระบบ", "__LOGOUT__"),
     ]
 
-    # Pad to multiple of 3
-    _padded = list(menu_items)
-    while len(_padded) % 3 != 0:
-        _padded.append(None)
+    # Build pure HTML grid
+    _cards_html = ""
+    for _em, _lb, _key in menu_items:
+        _is_logout = (_key == "__LOGOUT__")
+        _label_color = "#dc2626" if _is_logout else "#1e293b"
+        _cards_html += f'''
+        <div style="text-align:center;">
+            <button onclick="posNav('{_key}')" style="
+                width:100%; min-height:90px; border-radius:18px;
+                border:1px solid rgba(0,0,0,0.04); background:white;
+                box-shadow:0 2px 12px rgba(0,0,0,0.06);
+                font-size:36px; cursor:pointer; padding:12px 4px 6px;
+                line-height:1; transition:all 0.15s ease;
+                display:flex; align-items:center; justify-content:center;
+            ">{_em}</button>
+            <p style="text-align:center; font-size:13px; font-weight:700;
+                color:{_label_color}; margin:4px 0 10px; line-height:1.25;">{_lb}</p>
+        </div>'''
 
-    st.markdown('<div class="pos-menu-grid">', unsafe_allow_html=True)
-    for _rs in range(0, len(_padded), 3):
-        _cols = st.columns(3)
-        for _ci, _col in zip(range(3), _cols):
-            _itm = _padded[_rs + _ci]
-            with _col:
-                if _itm is None:
-                    st.empty()
-                else:
-                    _em, _lb, _key = _itm
-                    _is_logout = (_key == "__LOGOUT__")
-                    if st.button(_em, key=f"menu_{_key}", use_container_width=True):
-                        if _is_logout:
-                            st.session_state.logged_in = False
-                            st.session_state.username = ""
-                            st.session_state.role = ""
-                            st.session_state.full_name = ""
-                            st.session_state.page = "home"
-                            try: del st.query_params["s"]
-                            except: pass
-                            _run_js('try{parent.localStorage.removeItem("pos_token")}catch(e){} try{localStorage.removeItem("pos_token")}catch(e){}')
-                            st.rerun()
-                        else:
-                            st.session_state.page = _key
-                            st.rerun()
-                    _label_cls = "pos-menu-label" + (" pos-menu-label-logout" if _is_logout else "")
-                    st.markdown(f'<p class="{_label_cls}">{_lb}</p>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    _menu_html = f'''
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; width:100%;">
+        {_cards_html}
+    </div>
+    <script>
+    function posNav(key) {{
+        var loc = (parent && parent.location) ? parent.location : window.location;
+        var u = new URL(loc.href);
+        if (key === '__LOGOUT__') {{
+            u.searchParams.delete('s');
+            u.searchParams.delete('nav');
+            u.searchParams.set('logout', '1');
+            try {{ parent.localStorage.removeItem("pos_token"); }} catch(e) {{}}
+            try {{ localStorage.removeItem("pos_token"); }} catch(e) {{}}
+        }} else {{
+            u.searchParams.set('nav', key);
+        }}
+        loc.href = u.toString();
+    }}
+    </script>
+    '''
+    st_html(_menu_html, height=420)
 
     # Footer
     st.markdown(f"""<div style="text-align:center; margin-top:20px; padding:10px 0;
@@ -1786,6 +1744,13 @@ def page_home():
 # ============================================================================
 
 check_login()
+
+# Handle nav query param from HTML menu buttons
+_nav_param = st.query_params.get("nav", "").strip()
+if _nav_param and _nav_param in ("pos", "products", "dashboard", "sales", "customers", "reports", "home"):
+    st.session_state.page = _nav_param
+    try: del st.query_params["nav"]
+    except: pass
 
 if not st.session_state.get("logged_in", False):
     login_page()
