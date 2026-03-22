@@ -106,23 +106,63 @@ def load_custom_css():
         --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
     }
 
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background-color: #1e3a5f;
-    }
-
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-        color: white;
-    }
-
-    [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stButton button {
-        color: white;
-    }
+    /* Hide sidebar completely */
+    [data-testid="stSidebar"] { display: none !important; }
 
     /* Main content */
     .main {
-        background-color: #f8fafc;
+        background-color: #f0f4f8;
+    }
+
+    /* ============ MENU GRID (เหมือนแอปแอร์) ============ */
+    .pos-menu-grid [data-testid="stHorizontalBlock"] {
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 10px !important;
+        width: 100% !important;
+    }
+    @media (max-width: 480px) {
+        .pos-menu-grid [data-testid="stHorizontalBlock"] {
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 8px !important;
+        }
+        .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"] {
+            min-height: 75px !important;
+            font-size: 28px !important;
+            border-radius: 14px !important;
+        }
+    }
+    .pos-menu-grid [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+        width: auto !important; min-width: 0 !important;
+        max-width: none !important; flex: none !important;
+        padding: 0 !important;
+    }
+    .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"] {
+        width: 100% !important;
+        min-height: 90px !important;
+        border-radius: 18px !important;
+        border: 1px solid rgba(0,0,0,0.04) !important;
+        background: white !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
+        font-size: 36px !important;
+        padding: 12px 4px 6px !important;
+        line-height: 1 !important;
+        transition: all 0.15s ease !important;
+    }
+    .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.12) !important;
+    }
+    .pos-menu-grid [data-testid="stHorizontalBlock"] button[kind="secondary"]:active {
+        transform: scale(0.96) !important;
+    }
+    .pos-menu-label {
+        text-align: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: #1e293b;
+        margin: 2px 0 10px;
+        line-height: 1.25;
     }
 
     /* Header gradient */
@@ -1512,58 +1552,36 @@ def page_home():
         </div>""", unsafe_allow_html=True)
 
     # Menu Grid
-    st.markdown('<p style="font-size:14px; font-weight:700; color:#475569; margin:16px 0 10px;">📱 เมนูหลัก</p>', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:14px; font-weight:700; color:#475569; margin:16px 0 10px; letter-spacing:0.3px;">📱 เมนูหลัก</p>', unsafe_allow_html=True)
 
     menu_items = [
-        ("🛒", "POS ขาย", "pos", "#059669", "#d1fae5"),
-        ("📦", "จัดการสินค้า", "products", "#7c3aed", "#ede9fe"),
-        ("📊", "แดชบอร์ด", "dashboard", "#2563eb", "#dbeafe"),
-        ("📋", "ประวัติขาย", "sales", "#f59e0b", "#fef3c7"),
-        ("👥", "ลูกค้า", "customers", "#ec4899", "#fce7f3"),
-        ("📈", "รายงาน", "reports", "#ef4444", "#fee2e2"),
+        ("🛒", "POS ขาย", "pos"),
+        ("📦", "จัดการสินค้า", "products"),
+        ("📊", "แดชบอร์ด", "dashboard"),
+        ("📋", "ประวัติขาย", "sales"),
+        ("👥", "ลูกค้า", "customers"),
+        ("📈", "รายงาน", "reports"),
     ]
 
-    # CSS สำหรับปุ่มเมนู
-    st.markdown("""<style>
-    .pos-menu-btn button[kind="secondary"] {
-        width: 100% !important;
-        min-height: 85px !important;
-        border-radius: 16px !important;
-        border: 1px solid rgba(0,0,0,0.04) !important;
-        background: white !important;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
-        font-size: 34px !important;
-        padding: 10px 4px 6px !important;
-        line-height: 1 !important;
-        transition: all 0.15s ease !important;
-    }
-    .pos-menu-btn button[kind="secondary"]:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(0,0,0,0.12) !important;
-    }
-    .pos-menu-label {
-        text-align: center;
-        font-size: 13px;
-        font-weight: 700;
-        color: #1e293b;
-        margin: 2px 0 12px;
-        line-height: 1.25;
-    }
-    </style>""", unsafe_allow_html=True)
+    # Pad to multiple of 3
+    _padded = list(menu_items)
+    while len(_padded) % 3 != 0:
+        _padded.append(None)
 
-    st.markdown('<div class="pos-menu-btn">', unsafe_allow_html=True)
-    # 3 columns x 2 rows
-    for row_start in range(0, len(menu_items), 3):
-        cols = st.columns(3)
-        for i, col in enumerate(cols):
-            idx = row_start + i
-            if idx < len(menu_items):
-                emoji, label, key, color, bg = menu_items[idx]
-                with col:
-                    if st.button(emoji, key=f"menu_{key}", use_container_width=True):
-                        st.session_state.page = key
+    st.markdown('<div class="pos-menu-grid">', unsafe_allow_html=True)
+    for _rs in range(0, len(_padded), 3):
+        _cols = st.columns(3)
+        for _ci, _col in zip(range(3), _cols):
+            _itm = _padded[_rs + _ci]
+            with _col:
+                if _itm is None:
+                    st.empty()
+                else:
+                    _em, _lb, _key = _itm
+                    if st.button(_em, key=f"menu_{_key}", use_container_width=True):
+                        st.session_state.page = _key
                         st.rerun()
-                    st.markdown(f'<p class="pos-menu-label">{label}</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="pos-menu-label">{_lb}</p>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Footer
