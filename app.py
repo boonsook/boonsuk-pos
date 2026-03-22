@@ -724,252 +724,316 @@ def page_dashboard():
 # POS - POINT OF SALE PAGE
 # ============================================================================
 
-def page_pos():
-    """POS - Checkout and sales"""
+def _add_to_cart(product):
+    """Helper: add product to cart"""
+    existing = next((item for item in st.session_state.cart if item["id"] == product["id"]), None)
+    if existing:
+        existing["qty"] += 1
+    else:
+        st.session_state.cart.append({
+            "id": product["id"],
+            "barcode": product.get("barcode", ""),
+            "name": product.get("name", ""),
+            "price": float(product.get("price", 0)),
+            "cost": float(product.get("cost", 0)),
+            "qty": 1,
+            "unit": product.get("unit", "ชิ้น")
+        })
 
-    st.markdown("""
-    <div class="header-gradient">
-        <h1>🛒 ระบบขายสินค้า</h1>
-        <p>สแกนหรือค้นหาสินค้าเพื่อเพิ่มลงตะกร้า</p>
+def page_pos():
+    """POS - Cashier style like FlowAccount"""
+
+    # --- Today's sales summary card ---
+    df_sales = load_sales()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_total = 0.0
+    today_orders = 0
+    if not df_sales.empty and "created_at" in df_sales.columns:
+        df_sales["_date"] = pd.to_datetime(df_sales["created_at"], errors="coerce").dt.strftime("%Y-%m-%d")
+        df_today = df_sales[df_sales["_date"] == today_str]
+        today_total = df_today["total"].sum() if "total" in df_today.columns else 0
+        today_orders = len(df_today)
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#1e88e5 0%,#42a5f5 100%);
+        border-radius:16px; padding:20px; color:white; margin-bottom:16px; position:relative;">
+        <p style="margin:0; font-size:13px; opacity:0.9;">วันนี้ขายได้</p>
+        <p style="margin:6px 0 0; font-size:32px; font-weight:800;">฿{today_total:,.2f}</p>
+        <p style="margin:4px 0 0; font-size:12px; opacity:0.8;">จาก {today_orders} ออเดอร์</p>
     </div>
     """, unsafe_allow_html=True)
 
-    col_main, col_cart = st.columns([2, 1])
+    # --- Quick action buttons ---
+    st.markdown("""<style>
+    [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 8px !important; }
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        width: auto !important; flex: 1 1 0% !important; min-width: 0 !important;
+    }
+    </style>""", unsafe_allow_html=True)
 
-    with col_main:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
+    # Init pos_mode
+    if "pos_mode" not in st.session_state:
+        st.session_state.pos_mode = "select"
 
-        # Search & Filter
-        col_search, col_filter = st.columns([2, 1])
-        with col_search:
-            search_term = st.text_input("🔍 ค้นหาสินค้า (ชื่อ/บาร์โค้ด)", key="pos_search")
-        with col_filter:
-            selected_category = st.selectbox("หมวดหมู่", ["ทั้งหมด"] + POS_CATEGORIES, key="pos_category")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("🛒\nเลือกสินค้า", key="pos_btn_select", use_container_width=True):
+            st.session_state.pos_mode = "select"
+            st.rerun()
+    with c2:
+        if st.button("📷\nสแกนเนอร์", key="pos_btn_scan", use_container_width=True):
+            st.session_state.pos_mode = "scan"
+            st.rerun()
+    with c3:
+        if st.button("💰\nเก็บเงิน", key="pos_btn_pay", use_container_width=True):
+            st.session_state.pos_mode = "pay"
+            st.rerun()
 
-        products = fetch_products()
+    products = fetch_products()
 
-        # Filter products
-        filtered_products = products
+    # ============================
+    # MODE: SCANNER (camera)
+    # ============================
+    if st.session_state.pos_mode == "scan":
+        st.markdown("""
+        <div style="background:#fff; border-radius:14px; padding:16px; margin:10px 0;
+            box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <p style="font-size:15px; font-weight:700; color:#1e3a5f; margin:0 0 8px;">
+                📷 สแกนบาร์โค้ด / QR Code
+            </p>
+            <div id="reader" style="width:100%; border-radius:10px; overflow:hidden;"></div>
+            <p id="scan-result" style="font-size:14px; color:#059669; font-weight:600; margin:8px 0 0; display:none;"></p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Handle scanned barcode from query param
+        scanned = st.query_params.get("scanned", "").strip()
+        if scanned:
+            try: del st.query_params["scanned"]
+            except: pass
+            found = next((p for p in products if p.get("barcode", "") == scanned), None)
+            if found:
+                _add_to_cart(found)
+                st.success(f"✅ เพิ่ม {found['name']} ลงตะกร้าแล้ว!")
+                st.rerun()
+            else:
+                st.warning(f"⚠️ ไม่พบสินค้าบาร์โค้ด: {scanned}")
+
+        # Camera scanner HTML
+        _scanner_html = '''
+        <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+        <div id="reader" style="width:100%;"></div>
+        <script>
+        const html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.5 },
+            (decodedText) => {
+                html5QrCode.stop();
+                document.getElementById("scan-result").style.display = "block";
+                document.getElementById("scan-result").textContent = "พบ: " + decodedText;
+                try {
+                    var u = new URL(window.top.location.href);
+                    u.searchParams.set("scanned", decodedText);
+                    window.top.location.href = u.toString();
+                } catch(e) {
+                    var u2 = new URL(document.referrer || window.location.href);
+                    u2.searchParams.set("scanned", decodedText);
+                    window.open(u2.toString(), "_top");
+                }
+            },
+            (errorMessage) => {}
+        ).catch((err) => {
+            document.getElementById("reader").innerHTML =
+                '<p style="color:#ef4444;font-size:13px;text-align:center;padding:20px;">' +
+                '❌ ไม่สามารถเปิดกล้องได้<br>กรุณาอนุญาตการใช้กล้อง</p>';
+        });
+        </script>
+        '''
+        st_html(_scanner_html, height=350)
+
+        # Also allow manual barcode input
+        st.markdown("---")
+        manual_barcode = st.text_input("🔢 หรือพิมพ์บาร์โค้ดด้วยมือ", key="manual_bc")
+        if manual_barcode:
+            found = next((p for p in products if p.get("barcode", "") == manual_barcode.strip()), None)
+            if found:
+                _add_to_cart(found)
+                st.success(f"✅ เพิ่ม {found['name']} ลงตะกร้าแล้ว!")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.warning(f"⚠️ ไม่พบสินค้าบาร์โค้ด: {manual_barcode}")
+
+    # ============================
+    # MODE: SELECT PRODUCT
+    # ============================
+    elif st.session_state.pos_mode == "select":
+        search_term = st.text_input("🔍 ค้นหาสินค้า (ชื่อ/บาร์โค้ด)", key="pos_search")
+        selected_category = st.selectbox("หมวดหมู่", ["ทั้งหมด"] + POS_CATEGORIES, key="pos_category")
+
+        filtered = products
         if search_term:
-            search_lower = search_term.lower()
-            filtered_products = [p for p in filtered_products
-                               if search_lower in p.get("name", "").lower()
-                               or search_lower in p.get("barcode", "").lower()]
-
+            sl = search_term.lower()
+            filtered = [p for p in filtered if sl in p.get("name","").lower() or sl in p.get("barcode","").lower()]
         if selected_category != "ทั้งหมด":
-            filtered_products = [p for p in filtered_products if p.get("category") == selected_category]
+            filtered = [p for p in filtered if p.get("category") == selected_category]
 
-        # Product grid
-        if filtered_products:
-            cols = st.columns(3)
-            for idx, product in enumerate(filtered_products):
-                with cols[idx % 3]:
-                    st.markdown(f"""
-                    <div class="card" style="height: 100%;">
-                        <h4 style="margin-top: 0;">{product.get('name', 'ไม่ระบุ')}</h4>
-                        <p><strong>บาร์โค้ด:</strong> {product.get('barcode', '-')}</p>
-                        <p><strong>ราคา:</strong> {format_currency(float(product.get('price', 0)))}</p>
-                        <p><strong>คงเหลือ:</strong> {product.get('stock_qty', 0)} {product.get('unit', 'หน่วย')}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if st.button("เพิ่มลงตะกร้า", key=f"add_{product['id']}", use_container_width=True):
-                        # Add to cart
-                        existing = next((item for item in st.session_state.cart if item["id"] == product["id"]), None)
-                        if existing:
-                            existing["qty"] += 1
-                        else:
-                            st.session_state.cart.append({
-                                "id": product["id"],
-                                "barcode": product.get("barcode", ""),
-                                "name": product.get("name", ""),
-                                "price": float(product.get("price", 0)),
-                                "qty": 1,
-                                "unit": product.get("unit", "หน่วย")
-                            })
-                        st.success(f"เพิ่ม {product.get('name', '')} ลงตะกร้าแล้ว")
-                        time.sleep(0.5)
-                        st.rerun()
+        if filtered:
+            for product in filtered:
+                st.markdown(f"""
+                <div style="background:white; border-radius:12px; padding:12px 14px; margin-bottom:8px;
+                    box-shadow:0 1px 4px rgba(0,0,0,0.06); border-left:4px solid #2563eb;">
+                    <p style="margin:0; font-size:15px; font-weight:700; color:#1e293b;">{product.get('name','ไม่ระบุ')}</p>
+                    <p style="margin:2px 0 0; font-size:12px; color:#64748b;">
+                        บาร์โค้ด: {product.get('barcode','-')} | คงเหลือ: {product.get('stock_qty',0)} {product.get('unit','ชิ้น')}
+                    </p>
+                    <p style="margin:4px 0 0; font-size:18px; font-weight:800; color:#2563eb;">฿{float(product.get('price',0)):,.2f}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button(f"➕ เพิ่มลงตะกร้า", key=f"add_{product['id']}", use_container_width=True):
+                    _add_to_cart(product)
+                    st.success(f"✅ เพิ่ม {product['name']}")
+                    time.sleep(0.3)
+                    st.rerun()
         else:
             st.info("ไม่พบสินค้า")
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    # ============================
+    # MODE: PAYMENT
+    # ============================
+    elif st.session_state.pos_mode == "pay":
+        st.markdown("""
+        <div style="background:white; border-radius:14px; padding:16px; margin-bottom:10px;
+            box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <p style="font-size:16px; font-weight:700; color:#1e3a5f; margin:0;">💰 ชำระเงิน</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # Shopping Cart Sidebar
-    with col_cart:
-        st.markdown("<div class='card'><h2>ตะกร้าสินค้า</h2>", unsafe_allow_html=True)
+    # ============================
+    # CART (always visible at bottom)
+    # ============================
+    st.markdown("---")
+    cart_count = sum(item["qty"] for item in st.session_state.cart)
+    subtotal = sum(item["price"] * item["qty"] for item in st.session_state.cart)
 
-        if st.session_state.cart:
-            # Cart items
-            for idx, item in enumerate(st.session_state.cart):
+    st.markdown(f"""
+    <div style="background:#1e3a5f; color:white; border-radius:14px; padding:14px 16px;
+        display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div>
+            <span style="font-size:14px; font-weight:600;">🛒 ตะกร้า ({cart_count} ชิ้น)</span>
+        </div>
+        <div>
+            <span style="font-size:20px; font-weight:800;">฿{subtotal:,.2f}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if st.session_state.cart:
+        for idx, item in enumerate(st.session_state.cart):
+            ic1, ic2, ic3 = st.columns([5, 2, 1])
+            with ic1:
+                st.markdown(f"**{item['name']}**  \n฿{item['price']:,.0f} x {item['qty']}")
+            with ic2:
+                new_qty = st.number_input("จำนวน", value=item["qty"], min_value=1, key=f"qty_{idx}", label_visibility="collapsed")
+                if new_qty != item["qty"]:
+                    st.session_state.cart[idx]["qty"] = new_qty
+                    st.rerun()
+            with ic3:
+                if st.button("🗑️", key=f"del_{idx}"):
+                    st.session_state.cart.pop(idx)
+                    st.rerun()
+
+        discount = st.number_input("ส่วนลด (บาท)", min_value=0.0, value=0.0, step=100.0, key="pos_discount")
+        total = subtotal - discount
+
+        st.markdown(f"""
+        <div style="background:#f0f9ff; padding:14px; border-radius:10px; margin:10px 0;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                <span style="color:#64748b;">ยอดรวม</span><span style="font-weight:600;">฿{subtotal:,.2f}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                <span style="color:#64748b;">ส่วนลด</span><span style="font-weight:600; color:#ef4444;">-฿{discount:,.2f}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; padding-top:8px; border-top:2px solid #2563eb;">
+                <span style="font-size:18px; font-weight:800; color:#1e3a5f;">รวมทั้งสิ้น</span>
+                <span style="font-size:22px; font-weight:800; color:#2563eb;">฿{total:,.2f}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        payment_method = st.selectbox("วิธีชำระเงิน", PAYMENT_METHODS, key="pos_pay_method")
+
+        if payment_method == "เงินสด":
+            cash_amount = st.number_input("จำนวนเงินสดที่รับ", min_value=total, value=total, step=100.0, key="pos_cash")
+            change = cash_amount - total
+            st.info(f"💵 เงินทอน: ฿{change:,.2f}")
+
+        cashier_name = st.session_state.get("full_name", st.session_state.get("username", "Admin"))
+
+        if st.button("✅ ชำระเงิน", use_container_width=True, type="primary", key="pos_confirm_pay"):
+            try:
+                items_json = json.dumps([{
+                    "id": item["id"], "barcode": item["barcode"], "name": item["name"],
+                    "price": item["price"], "qty": item["qty"], "unit": item["unit"],
+                    "subtotal": item["price"] * item["qty"]
+                } for item in st.session_state.cart])
+
+                sale_data = {
+                    "sale_no": generate_sale_number(),
+                    "items_json": items_json,
+                    "subtotal": subtotal,
+                    "discount": discount,
+                    "total": total,
+                    "payment_method": payment_method,
+                    "cashier": cashier_name,
+                    "customer_name": "ลูกค้าทั่วไป",
+                    "created_at": datetime.now().isoformat()
+                }
+
+                supabase.table("pos_sales").insert(sale_data).execute()
+
+                for item in st.session_state.cart:
+                    prod = next((p for p in products if p["id"] == item["id"]), None)
+                    if prod:
+                        new_stock = int(prod.get("stock_qty", 0)) - item["qty"]
+                        supabase.table("pos_products").update({"stock_qty": max(0, new_stock)}).eq("id", item["id"]).execute()
+
+                clear_cache()
+
+                st.success(f"✅ ขายสำเร็จ! เลขที่: {sale_data['sale_no']}")
                 st.markdown(f"""
-                <div class="cart-item">
-                    <strong>{item['name']}</strong><br>
-                    {format_currency(item['price'])} x {item['qty']}
+                <div style="background:white; border-radius:14px; padding:16px; margin:10px 0;
+                    box-shadow:0 2px 8px rgba(0,0,0,0.08); text-align:center;">
+                    <p style="font-size:14px; font-weight:700; color:#1e3a5f;">{STORE_NAME}</p>
+                    <p style="font-size:11px; color:#64748b;">{STORE_PHONE} | {STORE_ADDRESS}</p>
+                    <hr style="border:none; border-top:1px dashed #cbd5e1;">
+                    <p style="font-size:12px; color:#475569;">
+                        เลขที่: {sale_data['sale_no']}<br>
+                        วันที่: {datetime.now().strftime('%d/%m/%Y %H:%M')}<br>
+                        แคชเชียร์: {cashier_name}
+                    </p>
+                    <p style="font-size:24px; font-weight:800; color:#2563eb; margin:8px 0;">฿{total:,.2f}</p>
+                    <p style="font-size:12px; color:#64748b;">ชำระ: {payment_method}</p>
+                    <hr style="border:none; border-top:1px dashed #cbd5e1;">
+                    <p style="font-size:11px; color:#94a3b8;">ขอบคุณที่ใช้บริการ</p>
                 </div>
                 """, unsafe_allow_html=True)
 
-                col_qty, col_del = st.columns([3, 1])
-                with col_qty:
-                    new_qty = st.number_input(f"จำนวน", value=item["qty"], min_value=1,
-                                            key=f"qty_{idx}", label_visibility="collapsed")
-                    if new_qty != item["qty"]:
-                        st.session_state.cart[idx]["qty"] = new_qty
-                        st.rerun()
+                st.session_state.cart = []
+                time.sleep(3)
+                st.rerun()
 
-                with col_del:
-                    if st.button("🗑️", key=f"del_{idx}"):
-                        st.session_state.cart.pop(idx)
-                        st.rerun()
+            except Exception as e:
+                st.error(f"❌ ข้อผิดพลาด: {str(e)}")
 
-            # Calculate totals
-            subtotal = sum(item["price"] * item["qty"] for item in st.session_state.cart)
-
-            st.divider()
-
-            discount = st.number_input("ส่วนลด (บาท)", min_value=0.0, value=0.0, step=100.0)
-            total = subtotal - discount
-
-            st.markdown(f"""
-            <div style="background: #f0f9ff; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
-                <p style="margin: 0.5rem 0;">ยอดรวม: <strong>{format_currency(subtotal)}</strong></p>
-                <p style="margin: 0.5rem 0;">ส่วนลด: <strong>{format_currency(discount)}</strong></p>
-                <p style="margin: 0.5rem 0; font-size: 1.2rem; color: #2563eb;">
-                    รวมทั้งสิ้น: <strong>{format_currency(total)}</strong>
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Payment method
-            payment_method = st.selectbox("วิธีชำระเงิน", PAYMENT_METHODS)
-
-            # Cash amount (for cash payment)
-            if payment_method == "เงินสด":
-                cash_amount = st.number_input("จำนวนเงินสดที่รับ", min_value=total, value=total, step=100.0)
-                change = cash_amount - total
-                st.info(f"เงินทอน: {format_currency(change)}")
-
-            # Cashier name
-            cashier_name = st.text_input("ชื่อแคชเชียร์", value="Admin")
-
-            # Customer selection
-            customers = fetch_customers()
-            customer_names = ["ลูกค้าทั่วไป"] + [c.get("name", "") for c in customers]
-            selected_customer = st.selectbox("ลูกค้า", customer_names)
-
-            if st.button("✅ ชำระเงิน", use_container_width=True, type="primary"):
-                # Save sale
-                try:
-                    items_json = json.dumps([{
-                        "id": item["id"],
-                        "barcode": item["barcode"],
-                        "name": item["name"],
-                        "price": item["price"],
-                        "qty": item["qty"],
-                        "unit": item["unit"],
-                        "subtotal": item["price"] * item["qty"]
-                    } for item in st.session_state.cart])
-
-                    sale_data = {
-                        "sale_no": generate_sale_number(),
-                        "items_json": items_json,
-                        "subtotal": subtotal,
-                        "discount": discount,
-                        "total": total,
-                        "payment_method": payment_method,
-                        "cashier": cashier_name,
-                        "customer_name": selected_customer,
-                        "created_at": datetime.now().isoformat()
-                    }
-
-                    result = supabase.table("pos_sales").insert(sale_data).execute()
-
-                    # Update stock
-                    for item in st.session_state.cart:
-                        product = next((p for p in fetch_products() if p["id"] == item["id"]), None)
-                        if product:
-                            new_stock = int(product.get("stock_qty", 0)) - item["qty"]
-                            supabase.table("pos_products").update({
-                                "stock_qty": max(0, new_stock)
-                            }).eq("id", item["id"]).execute()
-
-                    # Clear cache and cart
-                    clear_cache()
-                    st.session_state.cart = []
-
-                    # Show receipt
-                    st.success("✅ บันทึกการขายสำเร็จ!")
-
-                    # Show receipt modal
-                    st.markdown("<div class='receipt'>", unsafe_allow_html=True)
-                    st.markdown(f"""
-                    <div class="receipt-header">
-                        <h2 style="margin: 0;">{STORE_NAME}</h2>
-                        <p style="margin: 0.25rem 0; font-size: 0.9rem;">โทร. {STORE_PHONE}</p>
-                        <p style="margin: 0.25rem 0; font-size: 0.85rem;">{STORE_ADDRESS}</p>
-                        <p style="margin: 0.25rem 0; font-size: 0.85rem;">เลขประจำตัวผู้เสียภาษี: {TAX_ID}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    st.markdown(f"""
-                    <p style="font-size: 0.9rem; margin: 0.5rem 0;">
-                        <strong>เลขที่ใบเสร็จ:</strong> {sale_data['sale_no']}<br>
-                        <strong>วันที่:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}<br>
-                        <strong>แคชเชียร์:</strong> {cashier_name}
-                    </p>
-                    """, unsafe_allow_html=True)
-
-                    st.markdown("<div class='receipt-items'>", unsafe_allow_html=True)
-                    for item in st.session_state.cart:
-                        st.markdown(f"""
-                        <div class="receipt-item">
-                            <span>{item['name']}</span>
-                            <span>{format_currency(item['price'] * item['qty'])}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-                    st.markdown(f"""
-                    <div class="receipt-total">
-                        {format_currency(total)}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if payment_method == "เงินสด" and 'cash_amount' in locals():
-                        st.markdown(f"""
-                        <p style="font-size: 0.9rem;">
-                            เงินสด: {format_currency(cash_amount)}<br>
-                            เงินทอน: {format_currency(change)}
-                        </p>
-                        """, unsafe_allow_html=True)
-
-                    st.markdown("""
-                    <p style="font-size: 0.85rem; margin-top: 1rem;">
-                        ขอบคุณที่ใช้บริการ<br>
-                        <em>Thank you for your purchase</em>
-                    </p>
-                    """, unsafe_allow_html=True)
-
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-                    # Print button
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.button("🖨️ พิมพ์ใบเสร็จ", use_container_width=True)
-                    with col2:
-                        if st.button("➕ ขายต่อ", use_container_width=True):
-                            st.rerun()
-
-                    time.sleep(2)
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"ข้อผิดพลาด: {str(e)}")
-
-        else:
-            st.info("ตะกร้างานว่าง")
-
-        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="text-align:center; padding:30px 0; color:#94a3b8;">
+            <p style="font-size:40px; margin:0;">🛒</p>
+            <p style="font-size:14px; margin:8px 0 0;">ตะกร้าว่าง — เลือกสินค้าหรือสแกนบาร์โค้ด</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ============================================================================
 # PRODUCT MANAGEMENT PAGE
