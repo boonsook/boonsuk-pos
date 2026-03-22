@@ -1688,55 +1688,60 @@ def page_home():
         ("🚪", "ออกจากระบบ", "__LOGOUT__"),
     ]
 
-    # Build pure HTML grid
-    _cards_html = ""
-    for _em, _lb, _key in menu_items:
-        _is_logout = (_key == "__LOGOUT__")
-        _label_color = "#dc2626" if _is_logout else "#1e293b"
-        _cards_html += f'''
-        <div style="text-align:center;">
-            <button onclick="posNav('{_key}')" style="
-                width:100%; min-height:90px; border-radius:18px;
-                border:1px solid rgba(0,0,0,0.04); background:white;
-                box-shadow:0 2px 12px rgba(0,0,0,0.06);
-                font-size:36px; cursor:pointer; padding:12px 4px 6px;
-                line-height:1; transition:all 0.15s ease;
-                display:flex; align-items:center; justify-content:center;
-            ">{_em}</button>
-            <p style="text-align:center; font-size:13px; font-weight:700;
-                color:{_label_color}; margin:4px 0 10px; line-height:1.25;">{_lb}</p>
-        </div>'''
+    # CSS: force columns to stay horizontal on mobile + style buttons as icon cards
+    st.markdown("""<style>
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        gap: 8px !important;
+    }
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        width: auto !important;
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
+    }
+    button[kind="secondary"] {
+        min-height: 90px !important;
+        border-radius: 18px !important;
+        border: 1px solid rgba(0,0,0,0.04) !important;
+        background: white !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
+        font-size: 36px !important;
+        padding: 12px 4px 6px !important;
+        line-height: 1 !important;
+    }
+    </style>""", unsafe_allow_html=True)
 
-    _menu_html = f'''
-    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; width:100%;">
-        {_cards_html}
-    </div>
-    <script>
-    function posNav(key) {{
-        var baseUrl = '';
-        try {{ baseUrl = window.top.location.href; }} catch(e) {{}}
-        if (!baseUrl) {{ try {{ baseUrl = document.referrer; }} catch(e) {{}} }}
-        if (!baseUrl) {{ baseUrl = window.location.href; }}
-        var u = new URL(baseUrl);
-        if (key === '__LOGOUT__') {{
-            u.searchParams.delete('s');
-            u.searchParams.delete('nav');
-            u.searchParams.set('logout', '1');
-            try {{ window.top.localStorage.removeItem("pos_token"); }} catch(e) {{}}
-            try {{ parent.localStorage.removeItem("pos_token"); }} catch(e) {{}}
-        }} else {{
-            u.searchParams.set('nav', key);
-        }}
-        var dest = u.toString();
-        try {{ window.top.location.href = dest; }} catch(e1) {{
-            try {{ window.parent.location.href = dest; }} catch(e2) {{
-                window.open(dest, '_top');
-            }}
-        }}
-    }}
-    </script>
-    '''
-    st_html(_menu_html, height=420)
+    # Pad to multiple of 3
+    _padded = list(menu_items)
+    while len(_padded) % 3 != 0:
+        _padded.append(None)
+
+    for _rs in range(0, len(_padded), 3):
+        _cols = st.columns(3)
+        for _ci in range(3):
+            _itm = _padded[_rs + _ci]
+            with _cols[_ci]:
+                if _itm is None:
+                    st.empty()
+                else:
+                    _em, _lb, _key = _itm
+                    _is_logout = (_key == "__LOGOUT__")
+                    if st.button(_em, key=f"menu_{_key}", use_container_width=True):
+                        if _is_logout:
+                            st.session_state.logged_in = False
+                            st.session_state.username = ""
+                            st.session_state.role = ""
+                            st.session_state.full_name = ""
+                            st.session_state.page = "home"
+                            try: del st.query_params["s"]
+                            except: pass
+                            _run_js('try{parent.localStorage.removeItem("pos_token")}catch(e){} try{localStorage.removeItem("pos_token")}catch(e){}')
+                            st.rerun()
+                        else:
+                            st.session_state.page = _key
+                            st.rerun()
+                    _lbl_color = "#dc2626" if _is_logout else "#1e293b"
+                    st.markdown(f'<p style="text-align:center;font-size:13px;font-weight:700;color:{_lbl_color};margin:2px 0 10px;line-height:1.25;">{_lb}</p>', unsafe_allow_html=True)
 
     # Footer
     st.markdown(f"""<div style="text-align:center; margin-top:20px; padding:10px 0;
