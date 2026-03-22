@@ -744,7 +744,7 @@ def page_pos():
     """POS - Cashier style like FlowAccount"""
 
     # --- Today's sales summary card ---
-    df_sales = load_sales()
+    df_sales = fetch_sales()
     today_str = datetime.now().strftime("%Y-%m-%d")
     today_total = 0.0
     today_orders = 0
@@ -1694,8 +1694,8 @@ def page_home():
 
     # Stat cards
     try:
-        df_products = load_products()
-        df_sales = load_sales()
+        df_products = fetch_products()
+        df_sales = fetch_sales()
         today = datetime.now().strftime("%Y-%m-%d")
         today_sales = 0
         month_sales = 0
