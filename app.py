@@ -1713,18 +1713,26 @@ def page_home():
     </div>
     <script>
     function posNav(key) {{
-        var loc = (parent && parent.location) ? parent.location : window.location;
-        var u = new URL(loc.href);
+        var baseUrl = '';
+        try {{ baseUrl = window.top.location.href; }} catch(e) {{}}
+        if (!baseUrl) {{ try {{ baseUrl = document.referrer; }} catch(e) {{}} }}
+        if (!baseUrl) {{ baseUrl = window.location.href; }}
+        var u = new URL(baseUrl);
         if (key === '__LOGOUT__') {{
             u.searchParams.delete('s');
             u.searchParams.delete('nav');
             u.searchParams.set('logout', '1');
+            try {{ window.top.localStorage.removeItem("pos_token"); }} catch(e) {{}}
             try {{ parent.localStorage.removeItem("pos_token"); }} catch(e) {{}}
-            try {{ localStorage.removeItem("pos_token"); }} catch(e) {{}}
         }} else {{
             u.searchParams.set('nav', key);
         }}
-        loc.href = u.toString();
+        var dest = u.toString();
+        try {{ window.top.location.href = dest; }} catch(e1) {{
+            try {{ window.parent.location.href = dest; }} catch(e2) {{
+                window.open(dest, '_top');
+            }}
+        }}
     }}
     </script>
     '''
