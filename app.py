@@ -4,6 +4,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import json
+import hashlib
+import hmac
+import os
 from supabase import create_client, Client
 import barcode as bc
 from barcode.writer import ImageWriter
@@ -13,6 +16,7 @@ import openpyxl
 from PIL import Image
 import time
 from abc import ABC
+from streamlit.components.v1 import html as st_html
 
 st.set_page_config(
     page_title="ร้านบุญสุขอิเล็กทรอนิกส์ - POS",
@@ -47,6 +51,171 @@ POS_CATEGORIES = [
 ]
 
 PAYMENT_METHODS = ["เงินสด", "โอนเงิน", "บัตรเครดิต"]
+
+# ============================================================================
+# USERS & AUTHENTICATION
+# ============================================================================
+
+USERS = {
+    "admin": os.getenv("ADMIN_PASSWORD_HASH", hashlib.sha256("boonsuk_2024".encode()).hexdigest()),
+    "staff": os.getenv("STAFF_PASSWORD_HASH", hashlib.sha256("staff_1234".encode()).hexdigest()),
+}
+
+SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "")
+if not SESSION_SECRET_KEY:
+    import secrets as _sec
+    SESSION_SECRET_KEY = _sec.token_hex(32)
+
+def _run_js(js_code: str):
+    st_html(f"<script>{js_code}</script>", height=0)
+
+def _encode_session(data: dict) -> str:
+    import base64
+    payload = json.dumps(data, ensure_ascii=True, separators=(',', ':'))
+    sig = hmac.new(SESSION_SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest()
+    combined = payload.encode() + b'.' + sig
+    return base64.urlsafe_b64encode(combined).decode().rstrip('=')
+
+def _decode_session(token: str) -> dict:
+    import base64
+    try:
+        token = str(token).strip()
+        pad = 4 - len(token) % 4
+        if pad != 4:
+            token += "=" * pad
+        combined = base64.urlsafe_b64decode(token.encode())
+        sep = combined.rfind(b'.')
+        if sep < 0:
+            return {}
+        payload, sig = combined[:sep], combined[sep+1:]
+        expected = hmac.new(SESSION_SECRET_KEY.encode(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, expected):
+            return {}
+        return json.loads(payload.decode())
+    except Exception:
+        return {}
+
+def check_login():
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.session_state.role = ""
+        st.session_state.full_name = ""
+
+    # Handle logout
+    if st.query_params.get("logout", "") == "1":
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.session_state.role = ""
+        st.session_state.full_name = ""
+        st.session_state.page = "home"
+        try: del st.query_params["s"]
+        except: pass
+        return
+
+    if st.session_state.logged_in:
+        return
+
+    # Restore from URL token
+    token = str(st.query_params.get("s", "")).strip()
+    if token:
+        data = _decode_session(token)
+        if data and isinstance(data, dict):
+            exp = data.get("exp", 0)
+            if isinstance(exp, (int, float)) and exp > time.time():
+                st.session_state.logged_in = True
+                st.session_state.username = str(data.get("u", ""))
+                st.session_state.role = str(data.get("r", ""))
+                st.session_state.full_name = str(data.get("n", ""))
+                return
+
+def _save_session():
+    data = {
+        "u": st.session_state.get("username", ""),
+        "r": st.session_state.get("role", ""),
+        "n": st.session_state.get("full_name", ""),
+        "exp": time.time() + (30 * 24 * 3600),
+    }
+    token = _encode_session(data)
+    old_token = str(st.query_params.get("s", "")).strip()
+    if old_token != token:
+        st.query_params["s"] = token
+    _run_js(f'''
+        try {{ parent.localStorage.setItem("pos_token","{token}"); }} catch(e) {{}}
+        try {{ localStorage.setItem("pos_token","{token}"); }} catch(e) {{}}
+    ''')
+
+def login_page():
+    _is_logout = st.query_params.get("logout", "") == "1"
+    if not _is_logout:
+        _run_js('''
+            try {
+                var t = null;
+                try { t = parent.localStorage.getItem("pos_token"); } catch(e) {}
+                if(!t) { try { t = localStorage.getItem("pos_token"); } catch(e) {} }
+                if(t && t.length > 10) {
+                    var loc = (parent && parent.location) ? parent.location : window.location;
+                    var u = new URL(loc.href);
+                    if(!u.searchParams.has("s") && !u.searchParams.has("logout")) {
+                        u.searchParams.set("s", t);
+                        loc.replace(u.toString());
+                    }
+                }
+            } catch(e) {}
+        ''')
+    else:
+        _run_js('''
+            try { parent.localStorage.removeItem("pos_token"); } catch(e) {}
+            try { localStorage.removeItem("pos_token"); } catch(e) {}
+        ''')
+        try: del st.query_params["logout"]
+        except: pass
+
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none !important; }
+    .main .block-container { padding: 1rem !important; max-width: 100% !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div style="max-width:440px; margin:40px auto 0; background:#fff; border-radius:20px;
+        box-shadow:0 4px 24px rgba(0,0,0,0.08); padding:32px; text-align:center;
+        border-top:5px solid #2563eb;">
+        <div style="font-size:48px; margin-bottom:8px;">🛒</div>
+        <h2 style="margin:0; font-size:22px; color:#1e3a5f; font-weight:800;">{STORE_NAME}</h2>
+        <p style="color:#64748b; font-size:13px; margin:4px 0 0;">ระบบ POS ขายสินค้า</p>
+        <hr style="border:none; border-top:1px solid #e2e8f0; margin:20px 0;">
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_space1, col_form, col_space2 = st.columns([1, 2, 1])
+    with col_form:
+        st.markdown("#### 🔐 เข้าสู่ระบบ")
+        username = st.text_input("👤 ชื่อผู้ใช้", placeholder="admin หรือ staff", key="lg_user")
+        password = st.text_input("🔑 รหัสผ่าน", type="password", key="lg_pw")
+        if st.button("🚀 เข้าสู่ระบบ", use_container_width=True, type="primary", key="lg_btn"):
+            pw_hash = hashlib.sha256(password.encode()).hexdigest()
+            if username in USERS and USERS[username] == pw_hash:
+                role = "admin" if username == "admin" else "staff"
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.session_state.role = role
+                st.session_state.full_name = "ผู้ดูแลระบบ" if role == "admin" else "พนักงาน"
+                st.session_state.page = "home"
+                _save_session()
+                st.rerun()
+            else:
+                st.error("❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+
+        st.markdown(f"""
+        <div style="text-align:center; margin-top:24px; padding-top:16px;
+            border-top:1px solid #e2e8f0;">
+            <p style="font-size:10px; color:#94a3b8; margin:0;">
+                {STORE_NAME} • ☎ {STORE_PHONE}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ============================================================================
 # SUPABASE CONNECTION
@@ -164,6 +333,7 @@ def load_custom_css():
         margin: 2px 0 10px;
         line-height: 1.25;
     }
+    .pos-menu-label-logout { color: #dc2626 !important; }
 
     /* Header gradient */
     .header-gradient {
@@ -354,8 +524,6 @@ def load_custom_css():
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
-
-load_custom_css()
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -1495,12 +1663,18 @@ def back_home():
 # ============================================================================
 
 def page_home():
-    # Header
+    # Header with user info
+    _role = st.session_state.get("role", "")
+    _uname = st.session_state.get("username", "")
+    _role_badge = "👑 ผู้ดูแลระบบ" if _role == "admin" else "👔 พนักงาน"
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
         color: white; padding: 1.5rem; border-radius: 16px; margin-bottom: 1.5rem; text-align: center;">
         <h1 style="margin: 0; font-size: 1.6rem;">🏪 {STORE_NAME}</h1>
         <p style="margin: 0.3rem 0 0; font-size: 0.9rem; opacity: 0.9;">ระบบ POS ขายสินค้า | {STORE_PHONE}</p>
+        <p style="margin: 0.5rem 0 0; font-size: 0.8rem; opacity: 0.85;
+            background: rgba(255,255,255,0.15); display: inline-block;
+            padding: 3px 14px; border-radius: 20px;">{_role_badge} ({_uname})</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1561,6 +1735,7 @@ def page_home():
         ("📋", "ประวัติขาย", "sales"),
         ("👥", "ลูกค้า", "customers"),
         ("📈", "รายงาน", "reports"),
+        ("🚪", "ออกจากระบบ", "__LOGOUT__"),
     ]
 
     # Pad to multiple of 3
@@ -1578,10 +1753,23 @@ def page_home():
                     st.empty()
                 else:
                     _em, _lb, _key = _itm
+                    _is_logout = (_key == "__LOGOUT__")
                     if st.button(_em, key=f"menu_{_key}", use_container_width=True):
-                        st.session_state.page = _key
-                        st.rerun()
-                    st.markdown(f'<p class="pos-menu-label">{_lb}</p>', unsafe_allow_html=True)
+                        if _is_logout:
+                            st.session_state.logged_in = False
+                            st.session_state.username = ""
+                            st.session_state.role = ""
+                            st.session_state.full_name = ""
+                            st.session_state.page = "home"
+                            try: del st.query_params["s"]
+                            except: pass
+                            _run_js('try{parent.localStorage.removeItem("pos_token")}catch(e){} try{localStorage.removeItem("pos_token")}catch(e){}')
+                            st.rerun()
+                        else:
+                            st.session_state.page = _key
+                            st.rerun()
+                    _label_cls = "pos-menu-label" + (" pos-menu-label-logout" if _is_logout else "")
+                    st.markdown(f'<p class="{_label_cls}">{_lb}</p>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Footer
@@ -1594,26 +1782,32 @@ def page_home():
     </div>""", unsafe_allow_html=True)
 
 # ============================================================================
-# PAGE ROUTING
+# PAGE ROUTING (with login check)
 # ============================================================================
 
-if st.session_state.page == "home":
-    page_home()
-elif st.session_state.page == "dashboard":
-    back_home()
-    page_dashboard()
-elif st.session_state.page == "pos":
-    back_home()
-    page_pos()
-elif st.session_state.page == "products":
-    back_home()
-    page_product_management()
-elif st.session_state.page == "sales":
-    back_home()
-    page_sales_history()
-elif st.session_state.page == "customers":
-    back_home()
-    page_customers()
-elif st.session_state.page == "reports":
-    back_home()
-    page_reports()
+check_login()
+
+if not st.session_state.get("logged_in", False):
+    login_page()
+else:
+    load_custom_css()
+    if st.session_state.page == "home":
+        page_home()
+    elif st.session_state.page == "dashboard":
+        back_home()
+        page_dashboard()
+    elif st.session_state.page == "pos":
+        back_home()
+        page_pos()
+    elif st.session_state.page == "products":
+        back_home()
+        page_product_management()
+    elif st.session_state.page == "sales":
+        back_home()
+        page_sales_history()
+    elif st.session_state.page == "customers":
+        back_home()
+        page_customers()
+    elif st.session_state.page == "reports":
+        back_home()
+        page_reports()
