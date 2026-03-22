@@ -18,7 +18,7 @@ st.set_page_config(
     page_title="ร้านบุญสุขอิเล็กทรอนิกส์ - POS",
     page_icon="🛒",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # ============================================================================
@@ -403,7 +403,7 @@ def parse_thai_float(value):
 # ============================================================================
 
 if "page" not in st.session_state:
-    st.session_state.page = "dashboard"
+    st.session_state.page = "home"
 
 if "cart" not in st.session_state:
     st.session_state.cart = []
@@ -1441,74 +1441,161 @@ def page_reports():
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ============================================================================
-# SIDEBAR NAVIGATION
+# BACK TO HOME BUTTON
 # ============================================================================
 
-with st.sidebar:
+def back_home():
+    """แสดงปุ่มกลับหน้าหลัก"""
+    if st.button("🏠 กลับหน้าหลัก", type="secondary"):
+        st.session_state.page = "home"
+        st.rerun()
+
+# ============================================================================
+# HOME PAGE — GRID MENU
+# ============================================================================
+
+def page_home():
+    # Header
     st.markdown(f"""
-    <div style="text-align: center; padding: 1rem 0; color: white;">
-        <h2 style="margin: 0;">🏪</h2>
-        <h3 style="margin: 0.5rem 0; font-size: 1rem;">{STORE_NAME}</h3>
-        <p style="margin: 0; font-size: 0.85rem; opacity: 0.8;">{STORE_PHONE}</p>
+    <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+        color: white; padding: 1.5rem; border-radius: 16px; margin-bottom: 1.5rem; text-align: center;">
+        <h1 style="margin: 0; font-size: 1.6rem;">🏪 {STORE_NAME}</h1>
+        <p style="margin: 0.3rem 0 0; font-size: 0.9rem; opacity: 0.9;">ระบบ POS ขายสินค้า | {STORE_PHONE}</p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.divider()
+    # Stat cards
+    try:
+        df_products = load_products()
+        df_sales = load_sales()
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_sales = 0
+        month_sales = 0
+        low_stock = 0
+        if not df_sales.empty and "created_at" in df_sales.columns:
+            df_sales["_date"] = pd.to_datetime(df_sales["created_at"], errors="coerce").dt.strftime("%Y-%m-%d")
+            df_sales["_month"] = pd.to_datetime(df_sales["created_at"], errors="coerce").dt.to_period("M").astype(str)
+            this_month = datetime.now().strftime("%Y-%m")
+            today_sales = df_sales[df_sales["_date"] == today]["total"].sum()
+            month_sales = df_sales[df_sales["_month"] == this_month]["total"].sum()
+        if not df_products.empty and "stock_qty" in df_products.columns:
+            low_stock = int((df_products["stock_qty"].fillna(0).astype(int) < 5).sum())
+        n_products = len(df_products)
+    except:
+        today_sales = 0; month_sales = 0; n_products = 0; low_stock = 0
 
-    # Navigation
-    pages = {
-        "📊 แดชบอร์ด": "dashboard",
-        "🛒 ขายสินค้า": "pos",
-        "📦 จัดการสินค้า": "products",
-        "📋 ประวัติการขาย": "sales",
-        "👥 ลูกค้า": "customers",
-        "📈 รายงาน": "reports"
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"""<div style="background:white; border-radius:14px; padding:14px; border-left:4px solid #2563eb;
+            box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:10px;">
+            <p style="margin:0; font-size:12px; color:#64748b; font-weight:600;">💰 ยอดขายวันนี้</p>
+            <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:#1e3a5f;">฿{today_sales:,.0f}</p>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""<div style="background:white; border-radius:14px; padding:14px; border-left:4px solid #10b981;
+            box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:10px;">
+            <p style="margin:0; font-size:12px; color:#64748b; font-weight:600;">📊 ยอดขายเดือนนี้</p>
+            <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:#047857;">฿{month_sales:,.0f}</p>
+        </div>""", unsafe_allow_html=True)
+    c3, c4 = st.columns(2)
+    with c3:
+        st.markdown(f"""<div style="background:white; border-radius:14px; padding:14px; border-left:4px solid #f59e0b;
+            box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:10px;">
+            <p style="margin:0; font-size:12px; color:#64748b; font-weight:600;">📦 สินค้าทั้งหมด</p>
+            <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:#92400e;">{n_products} รายการ</p>
+        </div>""", unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""<div style="background:white; border-radius:14px; padding:14px; border-left:4px solid #ef4444;
+            box-shadow:0 1px 4px rgba(0,0,0,0.08); margin-bottom:10px;">
+            <p style="margin:0; font-size:12px; color:#64748b; font-weight:600;">⚠️ สินค้าใกล้หมด</p>
+            <p style="margin:4px 0 0; font-size:22px; font-weight:800; color:#dc2626;">{low_stock} รายการ</p>
+        </div>""", unsafe_allow_html=True)
+
+    # Menu Grid
+    st.markdown('<p style="font-size:14px; font-weight:700; color:#475569; margin:16px 0 10px;">📱 เมนูหลัก</p>', unsafe_allow_html=True)
+
+    menu_items = [
+        ("🛒", "POS ขาย", "pos", "#059669", "#d1fae5"),
+        ("📦", "จัดการสินค้า", "products", "#7c3aed", "#ede9fe"),
+        ("📊", "แดชบอร์ด", "dashboard", "#2563eb", "#dbeafe"),
+        ("📋", "ประวัติขาย", "sales", "#f59e0b", "#fef3c7"),
+        ("👥", "ลูกค้า", "customers", "#ec4899", "#fce7f3"),
+        ("📈", "รายงาน", "reports", "#ef4444", "#fee2e2"),
+    ]
+
+    # CSS สำหรับปุ่มเมนู
+    st.markdown("""<style>
+    .pos-menu-btn button[kind="secondary"] {
+        width: 100% !important;
+        min-height: 85px !important;
+        border-radius: 16px !important;
+        border: 1px solid rgba(0,0,0,0.04) !important;
+        background: white !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
+        font-size: 34px !important;
+        padding: 10px 4px 6px !important;
+        line-height: 1 !important;
+        transition: all 0.15s ease !important;
     }
+    .pos-menu-btn button[kind="secondary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.12) !important;
+    }
+    .pos-menu-label {
+        text-align: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: #1e293b;
+        margin: 2px 0 12px;
+        line-height: 1.25;
+    }
+    </style>""", unsafe_allow_html=True)
 
-    for page_name, page_key in pages.items():
-        if st.button(page_name, use_container_width=True,
-                    type="primary" if st.session_state.page == page_key else "secondary"):
-            st.session_state.page = page_key
-            st.rerun()
+    st.markdown('<div class="pos-menu-btn">', unsafe_allow_html=True)
+    # 3 columns x 2 rows
+    for row_start in range(0, len(menu_items), 3):
+        cols = st.columns(3)
+        for i, col in enumerate(cols):
+            idx = row_start + i
+            if idx < len(menu_items):
+                emoji, label, key, color, bg = menu_items[idx]
+                with col:
+                    if st.button(emoji, key=f"menu_{key}", use_container_width=True):
+                        st.session_state.page = key
+                        st.rerun()
+                    st.markdown(f'<p class="pos-menu-label">{label}</p>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    st.divider()
-
-    # Store info
-    st.markdown(f"""
-    <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; color: white; font-size: 0.85rem;">
-        <p style="margin: 0.25rem 0;"><strong>📍 ที่อยู่</strong></p>
-        <p style="margin: 0.25rem 0; font-size: 0.8rem;">{STORE_ADDRESS}</p>
-        <p style="margin: 0.25rem 0;"><strong>🆔 เลขประจำตัวผู้เสียภาษี</strong></p>
-        <p style="margin: 0.25rem 0; font-size: 0.8rem;">{TAX_ID}</p>
-        <p style="margin-top: 0.5rem 0; font-size: 0.75rem;">ระบบ POS v1.0</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Footer
+    st.markdown(f"""<div style="text-align:center; margin-top:20px; padding:10px 0;
+        border-top:1px solid #e2e8f0;">
+        <p style="font-size:10px; color:#94a3b8; margin:0;">
+            {STORE_NAME} • ☎ {STORE_PHONE} • POS v1.0
+        </p>
+        <p style="font-size:9px; color:#cbd5e1; margin:2px 0 0;">{STORE_ADDRESS}</p>
+    </div>""", unsafe_allow_html=True)
 
 # ============================================================================
 # PAGE ROUTING
 # ============================================================================
 
-if st.session_state.page == "dashboard":
+if st.session_state.page == "home":
+    page_home()
+elif st.session_state.page == "dashboard":
+    back_home()
     page_dashboard()
 elif st.session_state.page == "pos":
+    back_home()
     page_pos()
 elif st.session_state.page == "products":
+    back_home()
     page_product_management()
 elif st.session_state.page == "sales":
+    back_home()
     page_sales_history()
 elif st.session_state.page == "customers":
+    back_home()
     page_customers()
 elif st.session_state.page == "reports":
+    back_home()
     page_reports()
-
-# ============================================================================
-# FOOTER
-# ============================================================================
-
-st.divider()
-st.markdown("""
-<div style="text-align: center; color: #94a3b8; font-size: 0.85rem; padding: 1rem;">
-    <p>ร้านบุญสุขอิเล็กทรอนิกส์ • POS System v1.0</p>
-    <p>สำหรับสอบถามเพิ่มเติม โทร. 086-261-3829</p>
-</div>
-""", unsafe_allow_html=True)
